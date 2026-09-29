@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<!--
+  课堂同传 · 浏览器扩展
+
+  为什么脚本要拆成四个外部文件：MV3 的 CSP 禁止内联 <script>，也不能放宽，
+  所以只能按序外链。各文件管什么见下面。它们都是**源码**，直接改就行。
+
+  另外这个页面也能当普通网页打开（开发时就是这么测的），只是那样没有扩展权限。
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>课堂同传</title>
+<link rel="icon" href="data:,">
+<!--
+  界面骨架与样式在这里，逻辑在四个 js 里：
+    01-core-api.js   prompt 与 JSON 契约、docx 生成、拼请求 / 解析返回的中间层
+    02-app.js        前端主体：实时字幕、识别调度、翻译批处理、答题、悬浮窗
+    03-settings.js   设置面板（模型配置 + 术语表）
+    04-ext-boot.js   扩展专属接线：自定义域名的权限申请、自检面板标注
+
+  视觉方向是「暗色书斋」：这不是一个应用，是一本在昏暗里读的书。
+  低头几秒、扫完、抬头——所以一切服从「快读」和「低噪音」。
+-->
+<style>
+
+  /* ============================================================================
+     课堂同传 · 视觉系统
+     方向：暗色书斋。这不是一个「应用」，是一本在昏暗里读的书。
+     用户低头 5 秒，扫完，抬头——所以一切服从「快读」和「低噪音」。
+     ============================================================================ */
+  :root{
+    /* 底色：Claude 的暖白。刻意**不用纯白** —— 纯白铺满屏在投影灯下更刺眼，暖白才像纸，
+       而且这正是 Claude Desktop 真正的底（bg-100 ≈ #FAF9F5）。
+       ⚠ 变量名**一个都没改**，只换值。所以整套 UI 自动换肤，改动面积最小 ——
+       以后跟上游新版合并时，冲突也最少。 */
+    --bg:#FAF9F5; --bg-2:#FFFFFF; --bg-3:#F0EEE6; --bg-sink:#F5F4EE;
+    --line:#E5E2D9; --line-2:#D5D2C7;
+    /* 墨色：Claude 的正文色是**暖近黑**，不是纯黑 */
+    --ink:#141413; --ink-2:#3D3D3A; --dim:#6F6E68; --dim-2:#9A988F;
+    /* 强调：Claude 的珊瑚橙（品牌色）。原来的金色全部映射到它 */
+    --gold:#D97757; --gold-2:#C15F3C; --gold-sink:#FBEEE8;   /* 提问 */
+    --jade:#4A7C59; --jade-2:#3F6B44; --jade-sink:#EAF1E9;   /* 状态 */
+    --rust:#B33A2B; --rust-sink:#FBEAE6;                     /* 错误 */
+    --violet:#7A5FA8;
+    /* 字体：Claude 是**无衬线**，跟它走。原来的中英双衬线是这个 app 的旧性格
+       （「一本在昏暗里读的书」），换成 sans 才像 Claude Desktop。
+       字号关系（中文明显大于英文）保留不动——那是为「低头 5 秒扫完」调出来的。 */
+    --f-en:"Inter","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+    --f-zh:"Noto Sans SC","PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+    --f-ui:"Noto Sans SC","PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;
+    --f-mono:"Cascadia Mono",Consolas,monospace;
+    --en-size:15.5px; --zh-size:23px;
+    --rail:400px;                 /* 右侧栏宽度 */
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-ui);
+    font-size:15px;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    display:flex;flex-direction:column;overflow:hidden}
+
+  /* 氛围：顶上一抹极淡的珊瑚暖光。
+     ⚠ 颗粒纹理在暗底上叫「纸感」，到亮底上就变成**脏**。所以这里几乎关掉
+       （.15 → .035）：只留一点点破掉大色块的塑料感，不让它显形。 */
+  body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:
+      radial-gradient(1000px 560px at 22% -12%, rgba(217,119,87,.055), transparent 68%),
+      radial-gradient(820px 480px at 96% 112%, rgba(193,95,60,.03), transparent 70%)}
+  body::after{content:'';position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.035;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='4'/></filter><rect width='140' height='140' filter='url(%23n)'/></svg>")}
+  header,main,footer,#answer,#diagwrap,#sysbar{position:relative;z-index:1}
+
+  /* ---------------------------------------------------------------- 控件 */
+  button{font-family:var(--f-ui);font-size:13px;cursor:pointer;color:var(--ink-2);
+    background:transparent;border:1px solid var(--line);border-radius:8px;
+    padding:6px 11px;transition:border-color .15s,color .15s,background .15s}
+  button:hover:not(:disabled){border-color:var(--line-2);color:var(--ink);background:rgba(20,20,19,.035)}
+  button:disabled{opacity:.32;cursor:not-allowed}
+  /* ⚠ 优先级坑：.ghost 和 .on 同为 (0,1,1)，谁写在后面谁赢。
+     之前把 .ghost 写在 .on 后面，把背景清成透明、文字色却留在 .on 的近黑，
+     结果「中文 / 英文」两个按钮在深色顶上完全看不见。别再调换这两条的次序。 */
+  button.on{background:var(--ink);color:var(--bg);border-color:var(--ink);font-weight:600}
+  button.ghost{background:transparent}
+  button.ghost.on{background:transparent;color:var(--gold);border-color:var(--gold-2);font-weight:500}
+  input[type=text]{font-family:var(--f-ui);font-size:13px;background:var(--bg-sink);color:var(--ink);
+    border:1px solid var(--line);border-radius:8px;padding:5px 10px;width:170px}
+  input[type=text]::placeholder{color:var(--dim-2)}
+  kbd{font-family:var(--f-mono);font-size:12px;background:var(--bg-3);
+    border:1px solid var(--line-2);border-radius:4px;padding:1px 6px;color:var(--ink-2)}
+
+  /* ---------------------------------------------------------------- 顶栏
+     分组：左=状态(静)，中=开始(唯一的主要动作)，右=工具(最静)。 */
+  header{display:flex;align-items:center;gap:18px;padding:0 18px;height:50px;
+    border-bottom:1px solid var(--line);background:rgba(250,249,245,.86);
+    backdrop-filter:blur(12px);flex:0 0 auto}
+  .brand{font-family:var(--f-zh);font-size:15px;letter-spacing:.06em;color:var(--ink);white-space:nowrap}
+  .pill{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--dim);white-space:nowrap}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--dim-2);flex:0 0 auto}
+  .dot.live{background:var(--rust);animation:breathe 2s ease-in-out infinite}
+  .dot.busy{background:var(--gold)} .dot.ok{background:var(--jade)} .dot.bad{background:var(--rust)}
+  @keyframes breathe{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.82)}}
+  .clock{font-family:var(--f-mono);font-size:13px;color:var(--dim);
+    font-variant-numeric:tabular-nums;letter-spacing:.02em}
+  .sp{margin-left:auto}
+  .divider{width:1px;height:20px;background:var(--line);flex:0 0 auto}
+
+  #btn-run{font-size:13.5px;font-weight:600;padding:7px 18px;border-radius:8px;
+    background:var(--ink);color:var(--bg);border-color:var(--ink);letter-spacing:.02em}
+  #btn-run:hover{background:#2E2E2B;border-color:#2E2E2B;color:var(--bg)}
+  #btn-run:not(.on){background:transparent;color:var(--ink-2);border-color:var(--line-2);font-weight:500}
+  #btn-run:not(.on):hover{color:var(--ink);background:rgba(20,20,19,.04)}
+
+  /* 字号步进器：课上要随手调，所以要常驻且够大点得到 */
+  .stepper{display:flex;align-items:center;gap:1px;border:1px solid var(--line);
+    border-radius:8px;overflow:hidden;background:var(--bg-sink)}
+  .stepper .lab{font-size:11.5px;color:var(--dim-2);padding:0 7px 0 9px;letter-spacing:.04em}
+  .stepper .val{font-family:var(--f-mono);font-size:11.5px;color:var(--dim);
+    min-width:26px;text-align:center;font-variant-numeric:tabular-nums}
+  .stepper button{border:0;border-radius:0;padding:4px 8px;font-size:14px;line-height:1;
+    color:var(--dim);background:transparent}
+  .stepper button:hover:not(:disabled){background:rgba(20,20,19,.07);color:var(--ink);border:0}
+  .stepper button:disabled{opacity:.22}
+
+  /* ---------------------------------------------------------------- 主体 */
+  main{flex:1;min-height:0;display:flex}
+  #wrap{flex:1;min-width:0;position:relative}
+  /* 行长：整屏宽下一行 100+ 字符，眼睛换行会累。压到 ~940px 更接近书的栏宽。 */
+  #list{position:absolute;inset:0;overflow-y:auto;padding:22px 0 88px;
+    scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+  #list::-webkit-scrollbar{width:9px}
+  #list::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px;border:3px solid transparent;background-clip:content-box}
+  #list::-webkit-scrollbar-thumb:hover{background:var(--line-2);background-clip:content-box}
+  #rows{max-width:940px;margin:0 auto;padding:0 34px}
+
+  /* 层级：靠明度落差，不靠色块。最新一段最亮，往上依次退后——
+     眼睛自然会落在最新的那段，不用画任何框。 */
+  .para{position:relative;padding:13px 0 14px 20px;opacity:.58;
+    transition:opacity .3s ease}
+  .para:hover{opacity:.86}
+  .para.recent1{opacity:1}
+  .para.recent2{opacity:.78}
+  .para + .para{border-top:1px solid rgba(20,20,19,.05)}
+  /* 左侧竖线：默认透明，只在特殊段落显形（提问 / 正在说） */
+  .para::before{content:'';position:absolute;left:0;top:14px;bottom:15px;width:2px;
+    border-radius:2px;background:transparent;transition:background .3s}
+  .para .en{font-family:var(--f-en),var(--f-zh);font-size:var(--en-size);line-height:1.58;
+    color:var(--dim);white-space:pre-wrap;font-variant-ligatures:common-ligatures}
+  .para .zh{font-family:var(--f-zh);font-size:var(--zh-size);line-height:1.52;color:var(--ink);
+    margin-top:7px;white-space:pre-wrap;letter-spacing:.01em}
+  .para.no-zh .zh{display:none}
+  .para.no-zh .en{color:var(--ink-2);font-size:calc(var(--en-size) + 2.5px)}
+  .para.no-en .en{display:none}
+  .para .pending{font-family:var(--f-ui);font-size:12px;color:var(--dim-2);margin-top:7px;
+    letter-spacing:.03em}
+  .para.err .pending{color:var(--rust)}
+  .para.err::before{background:var(--rust)}
+
+  /* 提问：老师向全班抛出的问题。用暖金竖线标出来，用户走神了也看得见。 */
+  .para.isq::before{background:linear-gradient(180deg,var(--gold),var(--gold-2) 60%,transparent)}
+  .para.isq .en{color:var(--gold-2)}
+  /* 提问段的中文行。原值 #F6E4C6 是深底上的浅奶油色，亮底上要变深琥珀才有对比。 */
+  .para.isq .zh{color:#8A5A2B}
+  .qbar{margin-top:9px}
+  .qchip{display:inline-flex;align-items:center;gap:5px;font-family:var(--f-ui);font-size:12px;
+    padding:3px 11px;border-radius:999px;cursor:pointer;letter-spacing:.03em;
+    background:var(--gold-sink);border:1px solid var(--gold-2);color:var(--gold);
+    transition:background .15s,color .15s}
+  .qchip:hover{background:var(--gold);color:var(--bg);border-color:var(--gold)}
+  .qchip.done{background:transparent;border-color:var(--line-2);color:var(--dim-2)}
+  .qchip.done:hover{background:var(--bg-3);color:var(--ink-2);border-color:var(--line-2)}
+
+  /* 正在说的那段：文字还在变，用翡翠点 + 斜体区分于已定稿 */
+  .para.open{opacity:.72}
+  .para.open::before{background:var(--jade-2)}
+  .para.open .en{color:var(--dim)}
+  .para.open .en .live{color:var(--ink-2);font-style:italic}
+  .para.open .en .listen{display:inline-block;width:5px;height:5px;border-radius:50%;
+    background:var(--jade);margin-right:9px;vertical-align:middle;animation:breathe 1.4s ease-in-out infinite}
+
+  /* ---------------------------------------------------------------- 空态 */
+  #empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:16px;text-align:center;padding:30px;z-index:2}
+  #empty h2{font-family:var(--f-zh);font-size:21px;font-weight:400;color:var(--ink-2);
+    margin:0;letter-spacing:.04em}
+  #empty p{margin:0;font-size:13.5px;line-height:2.05;color:var(--dim-2);max-width:470px}
+  #empty .keys{margin-top:6px;font-size:12.5px;color:var(--dim-2);line-height:2.4}
+  #empty kbd{margin:0 1px}
+
+  /* ---------------------------------------------------------------- 可拖的分隔条
+     课上不方便精确拖，所以两端还给两个小步进按钮（用户点名要「按钮」）。 */
+  #splitter{flex:0 0 auto;width:16px;display:flex;flex-direction:column;align-items:center;
+    cursor:col-resize;position:relative;z-index:2;user-select:none;background:transparent}
+  #splitter::after{content:'';position:absolute;top:0;bottom:0;left:50%;width:1px;
+    background:var(--line);transform:translateX(-50%);transition:background .15s}
+  #splitter:hover::after{background:var(--line-2)}
+  #splitter.dragging::after{background:var(--gold-2);width:2px}
+  /* ⚠ 三个按钮只占顶部一小段，**剩下的整条都是拖拽区**。
+     之前按钮填满整条 15px，根本没地方可拖——看着像坏了。 */
+  #splitter button{border:0;background:transparent;color:var(--dim-2);font-size:15px;
+    line-height:1;padding:4px 5px;position:relative;z-index:1;flex:0 0 auto;transition:color .15s}
+  #splitter button:hover{color:var(--gold);background:transparent}
+  #rail-grip{flex:1 1 auto;width:100%;position:relative;z-index:1;min-height:60px}
+  #rail-grip::before{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    width:3px;height:22px;border-radius:2px;background:var(--line-2);opacity:.5;transition:opacity .15s}
+  #splitter:hover #rail-grip::before{opacity:1;background:var(--dim)}
+  body.norail #splitter{display:none}
+
+  /* ---------------------------------------------------------------- 右侧栏
+     上=答题（急，5 秒内要读完，所以放最上面、最亮）
+     下=总结（缓，滚动积累，随时回看） */
+  aside{width:var(--rail);flex:0 0 auto;border-left:1px solid var(--line);
+    background:linear-gradient(180deg,#F7F6F0,#F0EEE6);
+    display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  body.norail aside{display:none}
+  aside .ahead{display:flex;align-items:center;gap:8px;padding:12px 16px 10px;flex:0 0 auto;
+    border-bottom:1px solid var(--line)}
+  aside .ahead h3{margin:0;font-family:var(--f-ui);font-size:11px;font-weight:600;
+    letter-spacing:.16em;color:var(--dim-2);text-transform:uppercase}
+  aside .ahead .cnt{font-family:var(--f-mono);font-size:11px;color:var(--dim-2)}
+  aside .ahead .sp{margin-left:auto}
+  aside .ahead button{padding:3px 9px;font-size:11.5px}
+  #sumlist{flex:1;overflow-y:auto;min-height:0;scrollbar-width:thin;
+    scrollbar-color:var(--line-2) transparent}
+  #sumlist::-webkit-scrollbar{width:9px}
+  #sumlist::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px;border:3px solid transparent;background-clip:content-box}
+  #sumempty{padding:26px 20px;font-size:12.5px;color:var(--dim-2);line-height:1.95;text-align:center}
+
+  .sum{padding:15px 18px 17px;border-bottom:1px solid var(--line);animation:rise .34s ease both}
+  @keyframes rise{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+  .sum .t{font-family:var(--f-mono);font-size:11px;color:var(--dim-2);
+    letter-spacing:.09em;font-variant-numeric:tabular-nums}
+  .sum .topic{font-family:var(--f-zh);font-size:16.5px;line-height:1.5;color:var(--ink);margin:7px 0 0}
+  .sum ul{margin:9px 0 0;padding:0;list-style:none}
+  .sum li{position:relative;padding-left:15px;font-size:13.5px;line-height:1.72;color:var(--ink-2)}
+  .sum li::before{content:'';position:absolute;left:2px;top:.68em;width:4px;height:4px;
+    border-radius:50%;background:var(--jade-2)}
+  .sum .terms{margin-top:10px;display:flex;flex-wrap:wrap;gap:5px}
+  .sum .terms span{font-family:var(--f-en);font-size:11.5px;color:var(--dim);
+    border:1px solid var(--line);border-radius:5px;padding:1px 7px;letter-spacing:.01em}
+  .sum .loading{font-size:12.5px;color:var(--dim-2);font-style:italic}
+
+  /* ---------------------------------------------------------------- 答题面板 */
+  #answer{position:fixed;top:50px;right:0;bottom:0;width:var(--rail);z-index:60;
+    background:linear-gradient(180deg,#FFFFFF,#FBF9F4);border-left:1px solid var(--gold-sink);
+    display:none;flex-direction:column;box-shadow:-8px 0 28px rgba(60,48,32,.12)}
+  #answer.on{display:flex;animation:slidein .22s ease both}
+  @keyframes slidein{from{transform:translateX(14px);opacity:0}to{transform:none;opacity:1}}
+  #answer .ahd{display:flex;align-items:center;gap:8px;padding:13px 16px;flex:0 0 auto;
+    border-bottom:1px solid var(--gold-sink)}
+  #answer .ahd b{font-family:var(--f-zh);font-size:14px;color:var(--gold);font-weight:500;letter-spacing:.04em}
+  #answer .ahd .sp{margin-left:auto}
+  #answer .ahd button{padding:4px 10px;font-size:12px}
+  #answer .abody{flex:1;overflow-y:auto;padding:16px 18px 34px;scrollbar-width:thin;
+    scrollbar-color:var(--line-2) transparent}
+  #answer .abody::-webkit-scrollbar{width:9px}
+  #answer .abody::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px;
+    border:3px solid transparent;background-clip:content-box}
+
+  .qline{border-left:2px solid var(--gold);padding:2px 0 2px 13px;margin-bottom:19px}
+  .qline .k{font-family:var(--f-ui);font-size:10.5px;letter-spacing:.16em;color:var(--gold-2);
+    text-transform:uppercase;margin-bottom:5px}
+  .qline .qen{font-family:var(--f-en);font-size:15px;line-height:1.55;color:var(--ink-2)}
+  .qline .meta{margin-top:10px;padding-top:10px;border-top:1px solid var(--gold-sink);
+    font-size:13px;line-height:1.78;color:var(--dim)}
+  .qline .meta b{color:var(--ink);font-weight:500}
+
+  .asec{margin-bottom:19px}
+  .asec > .k{font-family:var(--f-ui);font-size:10.5px;letter-spacing:.16em;color:var(--dim-2);
+    text-transform:uppercase;margin-bottom:8px}
+  .stall{font-family:var(--f-en);font-size:14.5px;font-style:italic;color:var(--dim);
+    padding-left:13px;border-left:1px solid var(--line-2);line-height:1.6}
+  /* 可以直接念的三句：全篇最大最亮，因为用户要在几秒内扫完就开口 */
+  .say{background:linear-gradient(180deg,rgba(217,119,87,.07),rgba(217,119,87,.02));
+    border:1px solid var(--gold-sink);border-radius:12px;padding:15px 17px}
+  .say .ln{display:flex;gap:12px;padding:8px 0;border-top:1px dashed rgba(217,119,87,.22)}
+  .say .ln:first-child{border-top:0;padding-top:2px}
+  .say .n{flex:0 0 15px;font-family:var(--f-mono);font-size:11.5px;color:var(--gold-2);
+    padding-top:5px;font-variant-numeric:tabular-nums}
+  /* 中英对照：中文在上（先确认意思），英文在下（照着念） */
+  .say .t{display:block}
+  .say .zh{display:block;font-family:var(--f-zh);font-size:14px;line-height:1.6;
+    color:var(--ink-2);margin-bottom:3px}
+  /* ⚠ 亮色下「最亮」= 最黑。原值 #FFF9F0 是深底上的近白，换到白底会直接看不见。 */
+  .say .en{display:block;font-family:var(--f-en);font-size:20px;line-height:1.48;color:var(--ink)}
+  .asec .hintline{font-size:11.5px;color:var(--dim-2);margin-top:8px;line-height:1.7}
+  /* 题型标签：用户一眼能看出这次是按哪种问法答的 */
+  .qline .kind{display:inline-block;font-family:var(--f-ui);font-size:10.5px;letter-spacing:.1em;
+    color:var(--jade);border:1px solid var(--jade-sink);border-radius:5px;padding:1px 7px;
+    margin-left:8px;text-transform:uppercase}
+  .qline .kind.again{color:var(--gold);border-color:var(--gold-sink)}
+  .aext{font-family:var(--f-en);font-size:14.5px;line-height:1.62;color:var(--dim);
+    padding-left:13px;border-left:1px solid var(--line-2)}
+  .awarn{font-size:13px;line-height:1.72;color:#8F3524;border-left:2px solid var(--rust);
+    padding-left:13px}
+  .await{padding:34px 0;text-align:center;font-size:13px;color:var(--dim-2)}
+  .aspin{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gold);
+    margin-right:9px;vertical-align:middle;animation:breathe 1.1s ease-in-out infinite}
+
+  /* ---------------------------------------------------------------- 底栏 */
+  footer{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:0 18px;height:38px;
+    border-top:1px solid var(--line);background:rgba(250,249,245,.86);
+    font-size:11.5px;color:var(--dim-2);letter-spacing:.02em;flex-wrap:wrap}
+  footer .grow{margin-left:auto}
+  footer label{display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap}
+  footer button{padding:4px 10px;font-size:11.5px}
+  /* 命名框解析出来的落地路径：边打字边显示，导入前就能确认存哪儿 */
+  #foot-target{margin-left:6px;color:var(--dim);white-space:nowrap;overflow:hidden;
+    text-overflow:ellipsis;max-width:44vw;font-family:var(--f-mono);font-size:11px}
+  #foot-target.ok{color:var(--jade-2)}
+  #foot-target.warn{color:var(--gold-2)}
+  #foot-target.bad{color:var(--rust)}
+
+  /* ---------------------------------------------------------------- 历史记录 */
+  #hist{position:fixed;inset:0;z-index:150;background:rgba(40,34,28,.3);backdrop-filter:blur(6px);
+    display:none;align-items:flex-start;justify-content:center;padding:56px 24px 24px;overflow:auto}
+  #hist.on{display:flex}
+  .hbox{width:780px;max-width:100%;background:var(--bg-2);border:1px solid var(--line-2);
+    border-radius:16px;box-shadow:0 12px 40px rgba(60,48,32,.16);display:flex;flex-direction:column;
+    max-height:calc(100vh - 90px)}
+  .hhd{display:flex;align-items:center;gap:12px;padding:16px 22px;
+    border-bottom:1px solid var(--line);flex:0 0 auto}
+  .hhd b{font-family:var(--f-zh);font-size:16px;font-weight:400;color:var(--ink);letter-spacing:.04em}
+  .hhd #hist-count{font-size:12px;color:var(--dim-2)}
+  .hhd .sp{margin-left:auto}
+  #hist-list{overflow-y:auto;padding:8px 12px 16px;scrollbar-width:thin;
+    scrollbar-color:var(--line-2) transparent}
+  #hist-list::-webkit-scrollbar{width:9px}
+  #hist-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px;
+    border:3px solid transparent;background-clip:content-box}
+  .hrow{padding:14px 16px;border-radius:10px;cursor:pointer;border:1px solid transparent;
+    transition:background .14s,border-color .14s;margin-top:6px}
+  .hrow:hover{background:var(--bg-3);border-color:var(--line-2)}
+  .hrow .h1{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .hrow .hn{font-family:var(--f-zh);font-size:15px;color:var(--ink)}
+  .hrow .hd{font-family:var(--f-mono);font-size:11.5px;color:var(--dim-2);letter-spacing:.04em}
+  .hrow .hm{font-size:12.5px;color:var(--dim);margin-top:5px}
+  .hrow .hm b{color:var(--ink-2);font-weight:500}
+  .hrow .hm .warn{color:var(--gold-2)}
+  .hempty{padding:40px 20px;text-align:center;font-size:13px;color:var(--dim-2);line-height:2}
+  .htip{margin:6px 4px 10px;padding:10px 14px;border-radius:9px;font-size:12.5px;line-height:1.85;
+    color:var(--gold-2);background:var(--gold-sink);border:1px solid rgba(217,119,87,.3)}
+  .htip kbd{background:rgba(20,20,19,.05);border-color:rgba(217,119,87,.3)}
+
+  /* 正在看历史时贴在顶上的条 */
+  #histbar{display:none;padding:9px 20px;font-size:13px;line-height:1.7;
+    color:#7A6440;background:rgba(210,180,140,.18);border-bottom:1px solid rgba(210,180,140,.5);
+    flex:0 0 auto;align-items:center;gap:14px;flex-wrap:wrap}
+  #histbar.on{display:flex}
+  /* 原来是蓝色系（BBD4F0/D6E7FA）。Claude 的配色里没有冷蓝，换成暖沙色，
+     否则这块会成为整页唯一的冷色，非常出戏。 */
+  #histbar b{color:#5C4420;font-weight:500}
+  #histbar .sp{margin-left:auto}
+  body.hidden #histbar{display:none}
+
+  /* ---------------------------------------------------------------- 提示条 */
+  #sysbar{display:none;padding:12px 20px;font-size:13.5px;line-height:1.85;
+    color:#8F3524;background:var(--rust-sink);border-bottom:1px solid rgba(179,58,43,.3);
+    flex:0 0 auto}
+  #sysbar.on{display:block}
+  #sysbar b{color:#6E2418}
+  #sysbar code{font-family:var(--f-mono);font-size:12px;background:rgba(20,20,19,.06);
+    padding:1px 6px;border-radius:4px}
+
+  #toast{position:fixed;left:50%;bottom:56px;transform:translateX(-50%);
+    background:var(--bg-3);border:1px solid var(--line-2);border-radius:10px;
+    padding:10px 18px;font-size:13px;color:var(--ink);display:none;z-index:120;
+    max-width:78vw;box-shadow:0 8px 28px rgba(60,48,32,.18)}
+  #toast.bad{border-color:rgba(179,58,43,.45);color:#8F3524}
+  #toast.ok{border-color:var(--jade-2);color:var(--ink)}
+
+  /* ---------------------------------------------------------------- 隐藏模式
+     之前只藏了 main/footer，顶栏 7 个按钮全还在——等于没藏。
+     现在全部收掉，只留一个看得见的胶囊说明怎么回来。
+     （之前那个 14px、50% 透明、色值贴着底色的暗点，等于没有。） */
+  #showbtn{display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:200;
+    align-items:center;gap:9px;padding:8px 18px;border-radius:999px;cursor:pointer;
+    background:rgba(250,249,245,.9);border:1px solid var(--line-2);color:var(--dim-2);
+    font-family:var(--f-ui);font-size:12px;letter-spacing:.05em;
+    backdrop-filter:blur(10px);transition:color .2s,border-color .2s}
+  #showbtn:hover{color:var(--ink-2);border-color:var(--dim-2)}
+  #showbtn i{width:5px;height:5px;border-radius:50%;background:var(--dim-2);
+    display:block;animation:breathe 2.6s ease-in-out infinite}
+  body.hidden header,body.hidden main,body.hidden footer,body.hidden #sysbar,
+  body.hidden #answer,body.hidden #diagwrap{display:none}
+  body.hidden #showbtn{display:flex}
+
+  /* ---------------------------------------------------------------- 诊断抽屉 */
+  #diagwrap{position:fixed;right:0;top:0;bottom:0;width:420px;max-width:94vw;z-index:110;
+    background:linear-gradient(180deg,#FFFFFF,#F5F4EE);border-left:1px solid var(--line);
+    padding:16px 18px;overflow-y:auto;display:none;
+    box-shadow:-8px 0 28px rgba(60,48,32,.12)}
+  #diagwrap.on{display:block}
+  #diagwrap h3{margin:0 0 10px;font-family:var(--f-ui);font-size:10.5px;font-weight:600;
+    letter-spacing:.16em;color:var(--dim-2);text-transform:uppercase}
+  #diagwrap .row{display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap}
+  #diag{background:var(--bg-sink);border:1px solid var(--line);border-radius:9px;padding:11px;
+    font-family:var(--f-mono);font-size:11.5px;line-height:1.6;white-space:pre-wrap;
+    word-break:break-word;max-height:46vh;overflow:auto;color:var(--dim)}
+  #selfcheck,#miccheck{font-size:13px;line-height:1.85;color:var(--ink-2)}
+
+  /* ---- 麦克风面板 ----
+     识别引擎（Web Speech）没有选设备的接口，只能用 Windows 的默认输入。所以这个
+     面板不是「让你挑麦」，而是把「实际在用哪一支」摊开：默认设备被别的程序改掉时
+     （常见的风险是「立体声混音」——环回设备，把系统播放的声音当输入），
+     屏幕上的字幕会全乱，而这里一眼能看出是为什么。
+     ⚠ 配色只用 :root 里真有的变量。之前这里写的是 --bad / --warn / --accent /
+       --dim2，这四个**一个都没定义过**，所以整套面板其实一直是继承了默认色。 */
+  #micdev{background:var(--bg-sink);border:1px solid var(--line);border-radius:9px;
+    padding:10px 12px}
+  #micdev .nm{font-size:13.5px;color:var(--ink);line-height:1.5;word-break:break-word}
+  #micdev .nm b{font-weight:600}
+  #micdev .sub{font-size:11.5px;color:var(--dim-2);margin-top:4px;line-height:1.6;
+    font-family:var(--f-mono);word-break:break-all}
+  #miclist{margin:9px 0 0;padding:8px 0 0;list-style:none;border-top:1px solid var(--line)}
+  #miclist li{font-size:12px;color:var(--dim);line-height:1.7;display:flex;
+    gap:7px;align-items:baseline}
+  #miclist li.cur{color:var(--ink-2)}
+  #miclist li .tag{flex:0 0 auto;font-size:10px;letter-spacing:.08em;border-radius:4px;
+    padding:1px 6px;border:1px solid var(--line-2);color:var(--dim-2)}
+  #miclist li.cur .tag{border-color:var(--jade-2);color:var(--jade)}
+  #miclist li.risky .tag{border-color:var(--rust);color:var(--rust)}
+  #micverdict{font-size:13px;line-height:1.85;color:var(--dim)}
+  #micverdict b{color:var(--ink-2)}
+
+  /* 滚动条统一 */
+  ::selection{background:rgba(217,119,87,.24)}
+
+
+#setup{position:fixed;inset:0;z-index:500;background:rgba(40,34,28,.32);backdrop-filter:blur(6px);
+  display:none;align-items:center;justify-content:center;padding:24px;overflow:auto}
+#setup.on{display:flex}
+.sbox{width:640px;max-width:100%;max-height:100%;overflow:auto;background:#FFFFFF;
+  border:1px solid #D5D2C7;border-radius:16px;padding:30px 32px;box-shadow:0 12px 40px rgba(60,48,32,.16)}
+.sbox h1{font-family:var(--f-zh);font-size:26px;font-weight:400;margin:0 0 10px;letter-spacing:.06em;color:#141413}
+.sbox .lead{font-size:13.5px;line-height:1.95;color:#6F6E68;margin:0 0 24px}
+.srow{display:flex;align-items:center;gap:12px;margin-bottom:11px}
+.srow label{flex:0 0 82px;font-size:13px;color:#6F6E68;text-align:right}
+.srow input{flex:1;font-family:Consolas,monospace;font-size:13px;background:#F5F4EE;color:#141413;
+  border:1px solid #E5E2D9;border-radius:8px;padding:9px 12px}
+.srow input:focus{outline:none;border-color:#C15F3C}
+.sbox details{margin-top:16px;border-top:1px solid #E5E2D9;padding-top:14px}
+.sbox summary{font-size:13.5px;color:#3D3D3A;cursor:pointer}
+.sbox ol,.sbox ul{font-size:13px;line-height:2.05;color:#6F6E68;padding-left:22px;margin:10px 0 0}
+.sbox code{font-family:Consolas,monospace;font-size:12px;background:#F5F4EE;padding:1px 6px;border-radius:4px;color:#D97757}
+.sbox .note{font-size:12.5px;line-height:1.95;color:#9A988F;margin:10px 0 0}
+#cfg-gloss{width:100%;height:190px;font-family:Consolas,monospace;font-size:12px;background:#F5F4EE;
+  color:#3D3D3A;border:1px solid #E5E2D9;border-radius:8px;padding:11px;margin-top:10px;resize:vertical}
+.sfoot{display:flex;align-items:center;gap:10px;margin-top:24px}
+.sfoot .sp{margin-left:auto}
+#cfg-msg{font-size:12.5px;color:#9A988F}
+#cfg-msg.ok{color:#4A7C59} #cfg-msg.bad{color:#B33A2B}
+.sbox button{font-family:var(--f-ui);font-size:13px;padding:9px 18px;border-radius:8px;
+  border:1px solid #E5E2D9;background:transparent;color:#3D3D3A;cursor:pointer}
+.sbox button:hover{border-color:#D5D2C7;color:#141413}
+.sbox button.primary{background:#141413;color:#FAF9F5;border-color:#141413;font-weight:600}
+.sbox button.primary:hover{background:#2E2E2B}
+
+</style>
+</head>
+<body>
+
+<header>
+  <span class="brand">课堂同传</span>
+  <div class="pill"><span class="dot" id="dot"></span><span id="status">未开始</span></div>
+  <span class="clock" id="clock">00:00</span>
+  <div class="divider"></div>
+  <button id="btn-run" class="on">开始</button>
+  <input type="text" id="course" placeholder="命名：MATH1101 W3 习题课"
+         title="写清课程编号和第几周。下次导入时会按这个自动归档、自动命名">
+
+  <div class="sp"></div>
+
+  <div class="stepper" title="英文原文大小　快捷键 [ 和 ]">
+    <span class="lab">英</span>
+    <button id="en-down" title="调小">−</button>
+    <span class="val" id="en-val">15.5</span>
+    <button id="en-up" title="调大">+</button>
+  </div>
+  <div class="stepper" title="中文译文大小　快捷键 - 和 =">
+    <span class="lab">中</span>
+    <button id="zh-down" title="调小">−</button>
+    <span class="val" id="zh-val">23</span>
+    <button id="zh-up" title="调大">+</button>
+  </div>
+
+  <div class="divider"></div>
+
+  <button id="btn-zh" class="ghost on" title="显示中文　C">中</button>
+  <button id="btn-en" class="ghost on" title="显示英文　E">EN</button>
+
+  <div class="divider"></div>
+
+  <button id="btn-float" title="悬浮字幕窗（不置顶，点它才升到最前）　P">悬浮</button>
+  <button id="btn-pin" title="置顶 / 取消置顶　O">置顶</button>
+  <button id="btn-rail" title="收起 / 展开右侧栏　R">侧栏</button>
+  <button id="btn-hist" title="以前的听课记录　H">历史</button>
+  <button id="btn-log" title="诊断日志">日志</button>
+  <button id="btn-hide" title="一键隐藏　Esc">隐藏</button>
+</header>
+
+<div id="sysbar"></div>
+
+<main>
+  <div id="wrap">
+    <div id="list"><div id="rows"></div></div>
+    <div id="empty">
+      <h2>按 <kbd>空格</kbd> 开始</h2>
+      <p>英文原文实时出现，中文翻译晚几秒跟上。<br>
+         没跟上就扫一眼英文，术语不懂就看中文。</p>
+      <p>老师向全班提问时，那段左边会亮起一条金线，<br>
+         按 <kbd>A</kbd> 出一份能直接念出口的发言。</p>
+      <div class="keys">
+        <kbd>↑</kbd><kbd>↓</kbd> 回看　<kbd>A</kbd> 答题　<kbd>P</kbd> 悬浮窗
+        <kbd>Esc</kbd> 隐藏　<kbd>Home</kbd> 回到最新
+      </div>
+    </div>
+  </div>
+
+  <div id="splitter" title="左右拖动改宽度">
+    <button id="rail-narrow" title="右栏窄一点">‹</button>
+    <button id="rail-reset" title="复位到默认宽度">↺</button>
+    <button id="rail-wide" title="右栏宽一点">›</button>
+    <i id="rail-grip" title="按住左右拖动"></i>
+  </div>
+
+  <aside>
+    <div class="ahead">
+      <h3>课堂总结</h3>
+      <span class="cnt" id="sumcnt"></span>
+      <span class="sp"></span>
+      <button id="btn-sum-now" title="不等自动触发，现在就把新内容总结一段">现在总结</button>
+    </div>
+    <div id="sumlist">
+      <div id="sumempty">开始之后，每过几分钟这里会自动攒出一张卡片，<br>
+        写清刚才那段讲了什么。<br><br>
+        课后再看，就是一整节课的骨架。</div>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <span id="foot-status">待机</span>
+  <span id="foot-stats"></span>
+  <span id="foot-target"></span>
+  <span class="grow"></span>
+  <label><input type="checkbox" id="opt-record"> 保存录音</label>
+  <button id="btn-md" disabled title="导出 markdown">导出 md</button>
+  <button id="btn-word" disabled title="导出 Word 文档">导出 word</button>
+  <button id="btn-import" disabled title="按命名写进笔记目录的 &lt;课程&gt;\weekN\">导入课程笔记</button>
+</footer>
+
+<div id="answer">
+  <div class="ahd">
+    <b>⚡ 快速答题</b>
+    <span class="sp"></span>
+    <button id="a-regen">重新生成</button>
+    <button id="a-close">关闭</button>
+  </div>
+  <div class="abody" id="a-body"></div>
+</div>
+
+<div id="histbar"></div>
+
+<div id="hist">
+  <div class="hbox">
+    <div class="hhd">
+      <b>听课记录</b><span id="hist-count"></span>
+      <span class="sp"></span>
+      <button id="hist-close">关闭</button>
+    </div>
+    <div id="hist-list"></div>
+  </div>
+</div>
+
+<div id="showbtn" title="恢复（Esc）"><i></i>字幕已隐藏 · 按 <kbd>Esc</kbd> 或点这里恢复</div>
+<div id="toast"></div>
+
+<div id="diagwrap">
+  <div class="row">
+    <button id="btn-miccheck">检查麦克风</button>
+    <button id="btn-copy">复制诊断</button>
+    <button id="btn-clear-diag">清空</button>
+    <button id="btn-close-diag">关闭</button>
+  </div>
+  <h3>麦克风</h3>
+  <div id="miccheck">还没测。点上面「检查麦克风」——它分两段：先在 50 厘米处说几句（证明麦是活的），
+    再退到 3–5 米像老师讲课那样说（看教室里这个距离还剩多少）。一共 14 秒。</div>
+  <h3 style="margin-top:18px">运行时事件</h3>
+  <div id="diag">尚未记录事件。</div>
+  <h3 style="margin-top:18px">链路自检</h3>
+  <div id="selfcheck"></div>
+</div>
+
+
+
+<div id="setup">
+  <div class="sbox">
+    <h1>课堂同传</h1>
+    <p class="lead">线下面授课的实时字幕：英文原文实时出现，中文翻译晚几秒跟上。<br>
+       老师提问时按 <kbd>A</kbd> 出一份能直接念出口的发言。</p>
+
+    <div class="srow"><label>Base URL</label><input id="cfg-base" type="text" spellcheck="false"></div>
+    <div class="srow"><label>模型</label><input id="cfg-model" type="text" spellcheck="false"></div>
+    <div class="srow"><label>API Key</label><input id="cfg-key" type="password" spellcheck="false" placeholder="sk-..."></div>
+
+    <details>
+      <summary>怎么拿 API Key？</summary>
+      <ol>
+        <li>打开 <b>platform.deepseek.com</b>，注册（手机号就行）</li>
+        <li>充 10 块钱 —— 按实测用量，一节课大约几毛钱，够上很久</li>
+        <li>左边「API keys」→ 创建一个 → 复制那串 <code>sk-</code> 开头的</li>
+        <li>粘到上面的框里，点「测试连接」</li>
+      </ol>
+      <p class="note">Key 只存在你自己浏览器的 localStorage 里，不会发给任何第三方。<br>
+         但要注意：浏览器直连模型服务，你的 key 会出现在网络请求里，<b>别在公用电脑上用</b>。</p>
+    </details>
+
+    <details>
+      <summary>术语表（可选，但强烈建议）</summary>
+      <p class="note">你课上的专有名词，翻译时会被强制采用。默认带了一份传播学的。
+        JSON 格式，左边英文右边中文。改完点保存，改错了点「恢复默认」。</p>
+      <textarea id="cfg-gloss" spellcheck="false"></textarea>
+      <button id="cfg-gloss-reset" style="margin-top:8px">恢复默认</button>
+    </details>
+
+    <div class="sfoot">
+      <span id="cfg-msg"></span>
+      <span class="sp"></span>
+      <button id="cfg-test">测试连接</button>
+      <button id="cfg-save" class="primary">保存并开始</button>
+      <button id="cfg-close" style="display:none">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- ① 内嵌模块 + 浏览器侧后端：定义 window.__CP_API -->
+<script src="01-core-api.js"></script>
+<!-- ② 前端主体（和本地版是同一份源码）-->
+<script src="02-app.js"></script>
+<!-- ③ 设置面板的交互 -->
+<script src="03-settings.js"></script>
+<script src="04-ext-boot.js"></script>
+</body>
+</html>

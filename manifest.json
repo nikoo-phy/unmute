@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "课堂同传",
+  "version": "0.1.0",
+  "description": "线下面授课的实时字幕：英文原文实时出现，中文翻译晚几秒跟上。老师提问时按 A 出一份能念出口的发言。",
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "action": {
+    "default_title": "打开课堂同传",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+
+  "background": {
+    "service_worker": "sw.js"
+  },
+
+  "permissions": [
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://api.deepseek.com/*"
+  ],
+
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
+}

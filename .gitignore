@@ -1,0 +1,14 @@
+# 打包出来的安装包
+*.zip
+*.crx
+*.pem
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# 依赖（这个扩展刻意零依赖，这里只是兜底）
+node_modules/
