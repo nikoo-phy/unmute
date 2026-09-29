@@ -2,7 +2,7 @@
 
 ## Non-Commercial License
 
-**Copyright (c) 2026 nikoo-phy and [YOUR NAME / GITHUB HANDLE]. All rights reserved.**
+**Copyright (c) 2026 nikoo-phy and Bradleymao2. All rights reserved.**
 
 ---
 
@@ -131,9 +131,8 @@ this section survive termination.
 
 ## 10. Contact
 
-For commercial licensing, attribution enquiries, or permission requests:
-
-**[CONTACT NAME] — [EMAIL] — [REPOSITORY URL]**
+For commercial licensing, attribution enquiries, or permission requests,
+open an issue at **https://github.com/nikoo-phy/unmute**.
 
 ---
 

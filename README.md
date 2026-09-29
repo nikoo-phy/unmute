@@ -12,7 +12,7 @@ lectures. The English transcript lands within a second; the Chinese translation 
 seconds later. When the lecturer puts a question to the room, press one key and you get something
 you can actually say out loud.
 
-![许可 MIT](https://img.shields.io/badge/license-MIT-blue.svg)
+![许可 Non-Commercial](https://img.shields.io/badge/license-Non--Commercial-orange.svg)
 ![Manifest V3](https://img.shields.io/badge/manifest-v3-brightgreen.svg)
 ![仅 Edge / Chrome](https://img.shields.io/badge/browser-Edge%20%7C%20Chrome-orange.svg)
 
@@ -129,6 +129,10 @@ places — worth checking before you rely on this.
 | `02-app.js` | The front end: subtitles, recognition scheduling, translation batching, answers, floating window |
 | `03-settings.js` | Settings panel — model config and glossary |
 | `04-ext-boot.js` | Extension-specific wiring: origin permission requests, self-check labelling |
+| `LICENSE.md` | Non-commercial license terms |
+| `NOTICE.md` | Statement of originality, third-party components and services, licensing history |
+| `PRIVACY.md` | What leaves your machine, and which permissions are requested |
+| `test/smoke.mjs` | Loads the extension into Edge for real and checks it |
 
 MV3 forbids inline scripts, which is why the logic is split across four files loaded in order.
 
@@ -175,7 +179,17 @@ button that switches between them.
 
 ### License
 
-MIT — see [LICENSE](LICENSE).
+Released under a **non-commercial license**. You may use, study, share and modify it for personal,
+educational and research purposes. **Commercial use of any kind is not permitted** without prior
+written permission from the copyright holders.
+
+- [LICENSE.md](LICENSE.md) — the full terms.
+- [NOTICE.md](NOTICE.md) — statement of originality, third-party components and services, and the
+  project's licensing history.
+
+For attribution and acknowledgement, please see NOTICE.md. The project was released under the MIT
+License up to and including the `v1.0-mit` tag; **those grants remain in effect and cannot be
+revoked** — recipients of that version may still use it commercially.
 
 ---
 
@@ -272,6 +286,10 @@ API Key 只存在扩展自己的存储里。除了你配置的模型端点，不
 | `02-app.js` | 前端主体：字幕、识别调度、翻译批处理、答题、悬浮窗 |
 | `03-settings.js` | 设置面板 —— 模型配置与术语表 |
 | `04-ext-boot.js` | 扩展专属接线：域名授权、自检面板标注 |
+| `LICENSE.md` | 非商业许可条款 |
+| `NOTICE.md` | 原创性声明、第三方组件与服务、许可变更历史 |
+| `PRIVACY.md` | 什么数据会离开你的机器、申请了哪些权限 |
+| `test/smoke.mjs` | 把扩展真加载进 Edge 跑一遍检查 |
 
 MV3 禁止内联脚本，所以逻辑拆成四个文件按序加载。
 
@@ -312,4 +330,11 @@ node test/smoke.mjs
 
 ### 许可
 
-MIT，见 [LICENSE](LICENSE)。
+采用**非商业许可**。个人、教育、研究用途可以自由使用、学习、分享和修改；
+**未经版权人书面许可，任何形式的商业使用都不允许**。
+
+- [LICENSE.md](LICENSE.md) —— 完整条款。
+- [NOTICE.md](NOTICE.md) —— 原创性声明、用到的第三方组件与服务、以及本项目的许可变更历史。
+
+引用和致谢请见 NOTICE.md。本项目在 `v1.0-mit` 这个 tag（含）之前发布的是 MIT 许可；
+**那部分授权已经生效、不可撤销**——拿到那个版本的人仍可商用。

@@ -5,8 +5,8 @@
 This file accompanies `LICENSE.md`. It records **what in this project is original to the
 authors**, **what is third-party**, and **the history of this project's licensing**.
 
-Authors: **nikoo-phy** and **[YOUR NAME / GITHUB HANDLE]**
-Repository: **[REPOSITORY URL]**
+Authors: **nikoo-phy** and **Bradleymao2**
+Repository: **https://github.com/nikoo-phy/unmute**
 
 ---
 
@@ -24,8 +24,7 @@ authors, and constitute the original expression of this project:
   detection, spoken-answer generation, and rolling lecture summarization, including their
   output contracts and field-level constraints.
 - **Bilingual terminology glossary** — the curated Chinese/English glossary shipped with the
-  application. **[Confirm: compiled by the authors, or sourced from elsewhere? If sourced,
-  attribute it here.]**
+  application, compiled by the authors.
 - **Microphone diagnostics layer** — the two-stage near-field / far-field level test, the
   loopback-device and virtual-microphone detection heuristics, and the input-device
   enumeration and reporting logic.
@@ -79,11 +78,9 @@ govern their use, and nothing in `LICENSE.md` grants rights to them.
   third-party LLM API endpoint that the user configures, using the user's own credentials. The
   default endpoint is a DeepSeek-compatible API. This project ships **no model weights and no
   API keys**, and the authors are not affiliated with any model provider.
-- **Upstream codebase.** The application is built from the *class-copilot* codebase — its
-  prompt, document, and core modules and its web front end.
-  **[Confirm: is class-copilot the authors' own repository? If yes, state that here. If it
-  contains work by others, name them and state their license, because MIT requires their
-  copyright notice to be retained.]**
+- **Upstream codebase.** The application is built from *class-copilot*, the authors' own earlier
+  repository — its prompt, document and core modules, and its web front end. It is the authors'
+  own work, and no third-party code is included from it.
 - **Typefaces.** The interface references **Inter**, **Noto Sans SC**, **Segoe UI Variable**,
   and **Cascadia Mono**. These fonts are **not bundled** with this project; they are resolved
   from the user's operating system or obtained separately under their own licenses. Inter and
@@ -94,5 +91,6 @@ govern their use, and nothing in `LICENSE.md` grants rights to them.
 ## 4. How to Report a Problem
 
 If you believe this project misattributes your work, or uses your material in a way this
-notice does not describe, please open an issue or contact **[EMAIL]**. Attribution errors are
-treated as bugs and fixed promptly.
+notice does not describe, please open an issue at
+**https://github.com/nikoo-phy/unmute**. Attribution errors are treated as bugs and fixed
+promptly.
